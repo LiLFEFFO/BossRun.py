@@ -103,6 +103,51 @@ class Player:
         pygame.draw.circle(screen, color, (int(self.x), int(self.y)), self.radius)
         inner_color = BLUE if self.is_dashing else WHITE
         pygame.draw.circle(screen, inner_color, (int(self.x), int(self.y)), self.radius // 3)
+    
+    def can_attack_boss6(self, boss):
+        """Controlla se può attaccare il boss6 o le sue torrette"""
+        # Controlla se può attaccare il boss
+        boss_dist = math.hypot(self.x - boss.x, self.y - boss.y)
+        if boss_dist <= self.attack_range:
+            return True
+        
+        # Controlla se può attaccare qualche torrette
+        for turret in boss.turrets:
+            if turret.hp > 0:
+                turret_dist = math.hypot(self.x - turret.x, self.y - turret.y)
+                if turret_dist <= self.attack_range:
+                    return True
+        
+        return False
+
+def attack_boss6(self, boss):
+    """Attacca boss6 o le sue torrette (target più vicino)"""
+    targets = []
+    
+    # Aggiungi il boss come target possibile
+    boss_dist = math.hypot(self.x - boss.x, self.y - boss.y)
+    if boss_dist <= self.attack_range:
+        targets.append(('boss', boss_dist, boss))
+    
+    # Aggiungi le torrette come target possibili
+    for turret in boss.turrets:
+        if turret.hp > 0:
+            turret_dist = math.hypot(self.x - turret.x, self.y - turret.y)
+            if turret_dist <= self.attack_range:
+                targets.append(('turret', turret_dist, turret))
+    
+    if not targets:
+        return False
+    
+    # Attacca il target più vicino
+    target_type, _, target = min(targets, key=lambda x: x[1])
+    
+    if target_type == 'boss':
+        target.hp = max(0, target.hp - self.attack_damage)
+    elif target_type == 'turret':
+        target.take_damage(self.attack_damage)
+    
+    return True
 
 class Boss:
     def __init__(self, x, y):
@@ -570,7 +615,7 @@ class Boss5(Boss):
         elif self.form == "ghost":
             self.update_ghost_form(player)
             
-        # Mantieni il boss nei bordi (tranne in forma ghost)
+       
         if self.form != "ghost":
             current_radius = self.giant_radius if self.form == "giant" else self.radius
             self.x = max(current_radius, min(WINDOW_WIDTH - current_radius, self.x))
@@ -816,6 +861,342 @@ class Boss5(Boss):
         pygame.draw.circle(screen, (0, 255, 255), (int(self.x - 10), int(self.y - 10)), 3)
         pygame.draw.circle(screen, (0, 255, 255), (int(self.x + 10), int(self.y - 10)), 3)
 
+class Boss6(Boss):
+    def __init__(self, x, y):
+        super().__init__(x, y)
+        self.color = (255, 165, 0)  # Arancione
+        self.max_hp = 600
+        self.hp = self.max_hp
+        
+        # Torrette
+        self.turrets = []
+        self.max_turrets = 5
+        self.turret_spawn_cooldown = 180  # 3 secondi
+        self.turret_spawn_timer = 0
+        
+        # Bombe ad area
+        self.bombs = []
+        self.bomb_cooldown = 120  # 2 secondi
+        self.bomb_timer = 0
+        self.bomb_explosion_radius = 80
+        self.bomb_fuse_time = 120  # 2 secondi prima dell'esplosione
+        self.bomb_damage = 30
+        
+        # Cura dalle torrette
+        self.heal_cooldown = 60  # 1 secondo
+        self.heal_timer = 0
+        self.heal_amount = 3  # HP per torrette per secondo
+        
+        # Spawn iniziale delle torrette
+        self.spawn_initial_turrets()
+    
+    def spawn_initial_turrets(self):
+        """Spawna le torrette iniziali"""
+        for _ in range(self.max_turrets):
+            self.spawn_turret()
+    
+    def spawn_turret(self):
+        """Spawna una nuova torretta in posizione casuale"""
+        if len(self.turrets) >= self.max_turrets:
+            return
+            
+        # Trova una posizione valida (non troppo vicina al boss o al player)
+        attempts = 0
+        while attempts < 20:  # Massimo 20 tentativi
+            x = random.randint(50, WINDOW_WIDTH - 50)
+            y = random.randint(50, WINDOW_HEIGHT - 50)
+            
+            # Controlla distanza dal boss
+            boss_dist = math.hypot(x - self.x, y - self.y)
+            if boss_dist > 100:  # Almeno 100 pixel dal boss
+                self.turrets.append(Turret(x, y))
+                break
+            attempts += 1
+    
+    def update(self, player):
+        # Eredita il comportamento base del boss
+        super().update(player)
+        
+        # Timer per spawnare nuove torrette
+        if len(self.turrets) < self.max_turrets:
+            self.turret_spawn_timer -= 1
+            if self.turret_spawn_timer <= 0:
+                self.spawn_turret()
+                self.turret_spawn_timer = self.turret_spawn_cooldown
+        
+        # Timer per lanciare bombe
+        self.bomb_timer -= 1
+        if self.bomb_timer <= 0:
+            self.launch_bomb(player)
+            self.bomb_timer = self.bomb_cooldown
+        
+        # Timer per cura dalle torrette
+        self.heal_timer -= 1
+        if self.heal_timer <= 0:
+            self.heal_from_turrets()
+            self.heal_timer = self.heal_cooldown
+        
+        # Aggiorna torrette
+        for turret in self.turrets:
+            turret.update(player)
+        
+        # Rimuovi torrette distrutte
+        self.turrets = [t for t in self.turrets if t.hp > 0]
+        
+        # Aggiorna bombe
+        for bomb in self.bombs:
+            bomb['fuse_timer'] -= 1
+            if bomb['fuse_timer'] <= 0:
+                # Esplode: controlla se colpisce il player
+                dist = math.hypot(player.x - bomb['x'], player.y - bomb['y'])
+                if dist <= self.bomb_explosion_radius:
+                    player.hp = max(0, player.hp - self.bomb_damage)
+                bomb['exploded'] = True
+        
+        # Rimuovi bombe esplose
+        self.bombs = [b for b in self.bombs if not b.get('exploded', False)]
+    
+    def launch_bomb(self, player):
+        """Lancia una bomba verso la posizione del player"""
+        # Predici dove sarà il player (semplice previsione)
+        prediction_time = 60  # 1 secondo
+        predicted_x = player.x
+        predicted_y = player.y
+        
+        # Se il player si sta muovendo, predici la posizione
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_w] or keys[pygame.K_UP]:
+            predicted_y -= player.speed * prediction_time
+        if keys[pygame.K_s] or keys[pygame.K_DOWN]:
+            predicted_y += player.speed * prediction_time
+        if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+            predicted_x -= player.speed * prediction_time
+        if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+            predicted_x += player.speed * prediction_time
+        
+        # Mantieni la previsione nei bordi
+        predicted_x = max(50, min(WINDOW_WIDTH - 50, predicted_x))
+        predicted_y = max(50, min(WINDOW_HEIGHT - 50, predicted_y))
+        
+        self.bombs.append({
+            'x': predicted_x,
+            'y': predicted_y,
+            'fuse_timer': self.bomb_fuse_time,
+            'exploded': False
+        })
+    
+    def heal_from_turrets(self):
+        """Cura il boss in base al numero di torrette attive"""
+        active_turrets = len([t for t in self.turrets if t.hp > 0])
+        if active_turrets > 0 and self.hp < self.max_hp:
+            heal_amount = active_turrets * self.heal_amount
+            self.hp = min(self.max_hp, self.hp + heal_amount)
+    
+    def take_player_attack(self, player, damage):
+        """Gestisce l'attacco del player - può colpire boss o torrette"""
+        # Trova il target più vicino nel range di attacco
+        targets = []
+        
+        # Aggiungi il boss come target
+        boss_dist = math.hypot(player.x - self.x, player.y - self.y)
+        if boss_dist <= player.attack_range:
+            targets.append(('boss', boss_dist, self))
+        
+        # Aggiungi le torrette come target
+        for turret in self.turrets:
+            if turret.hp > 0:
+                turret_dist = math.hypot(player.x - turret.x, player.y - turret.y)
+                if turret_dist <= player.attack_range:
+                    targets.append(('turret', turret_dist, turret))
+        
+        if not targets:
+            return False
+        
+        # Colpisci il target più vicino
+        target_type, _, target = min(targets, key=lambda x: x[1])
+        
+        if target_type == 'boss':
+            self.hp = max(0, self.hp - damage)
+        elif target_type == 'turret':
+            target.hp = max(0, target.hp - damage)
+        
+        return True
+    
+    def draw(self, screen):
+        # Disegna il boss principale
+        pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), self.radius)
+        
+        # Occhi
+        eye_offset = self.radius // 3
+        pygame.draw.circle(screen, WHITE, (int(self.x - eye_offset), int(self.y - eye_offset)), 8)
+        pygame.draw.circle(screen, WHITE, (int(self.x + eye_offset), int(self.y - eye_offset)), 8)
+        pygame.draw.circle(screen, RED, (int(self.x - eye_offset), int(self.y - eye_offset)), 4)
+        pygame.draw.circle(screen, RED, (int(self.x + eye_offset), int(self.y - eye_offset)), 4)
+        
+        # Disegna torrette
+        for turret in self.turrets:
+            if turret.hp > 0:
+                turret.draw(screen)
+        
+        # Disegna bombe (con area di esplosione)
+        for bomb in self.bombs:
+            if not bomb.get('exploded', False):
+                # Bomba (cerchio nero)
+                pygame.draw.circle(screen, BLACK, (int(bomb['x']), int(bomb['y'])), 15)
+                
+                # Area di esplosione (cerchio rosso trasparente)
+                # Calcola l'alpha in base al tempo rimanente
+                alpha = max(70, int(150 * (1 - bomb['fuse_timer'] / self.bomb_fuse_time)))
+                
+                # Crea superficie trasparente per l'area
+                bomb_surface = pygame.Surface((self.bomb_explosion_radius * 2, self.bomb_explosion_radius * 2))
+                bomb_surface.set_alpha(alpha)
+                bomb_surface.fill((255, 0, 0))
+                
+                # Disegna cerchio dell'area
+                pygame.draw.circle(bomb_surface, (255, 100, 100), 
+                                 (self.bomb_explosion_radius, self.bomb_explosion_radius), 
+                                 self.bomb_explosion_radius)
+                
+                # Blit sulla schermata
+                screen.blit(bomb_surface, 
+                           (int(bomb['x'] - self.bomb_explosion_radius), 
+                            int(bomb['y'] - self.bomb_explosion_radius)))
+                
+                # Timer visivo sulla bomba
+                time_left = bomb['fuse_timer'] / 60.0  # Secondi
+                font = pygame.font.Font(None, 20)
+                timer_text = font.render(f"{time_left:.1f}", True, WHITE)
+                screen.blit(timer_text, (int(bomb['x'] - 10), int(bomb['y'] - 20)))
+
+class Turret:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.hp = 75
+        self.max_hp = 75
+        self.radius = 25
+        self.color = (100, 100, 100)  # Grigio
+        
+        # Attacco a raffica
+        self.projectiles = []
+        self.burst_cooldown = 180  # 3 secondi tra le raffiche
+        self.burst_timer = 0
+        self.shots_per_burst = 5
+        self.shot_delay = 8  # Delay tra i colpi della raffica
+        self.burst_active = False
+        self.burst_shots_fired = 0
+        self.burst_shot_timer = 0
+        
+        self.range = 200
+        self.projectile_speed = 4
+        self.projectile_damage = 8
+    
+    def update(self, player):
+        if self.hp <= 0:
+            return
+        
+        # Controlla se il player è nel range
+        dist = math.hypot(player.x - self.x, player.y - self.y)
+        
+        if dist <= self.range:
+            # Timer per iniziare nuova raffica
+            if not self.burst_active:
+                self.burst_timer -= 1
+                if self.burst_timer <= 0:
+                    self.burst_active = True
+                    self.burst_shots_fired = 0
+                    self.burst_shot_timer = 0
+            else:
+                # Gestione raffica attiva
+                self.burst_shot_timer -= 1
+                if self.burst_shot_timer <= 0 and self.burst_shots_fired < self.shots_per_burst:
+                    self.fire_at_player(player)
+                    self.burst_shots_fired += 1
+                    self.burst_shot_timer = self.shot_delay
+                
+                # Fine raffica
+                if self.burst_shots_fired >= self.shots_per_burst:
+                    self.burst_active = False
+                    self.burst_timer = self.burst_cooldown
+        
+        # Aggiorna proiettili
+        for proj in self.projectiles:
+            proj['x'] += proj['dx']
+            proj['y'] += proj['dy']
+            proj['life'] -= 1
+            
+            # Rimbalzo sui bordi
+            if proj['x'] <= 0 or proj['x'] >= WINDOW_WIDTH:
+                proj['dx'] *= -1
+            if proj['y'] <= 0 or proj['y'] >= WINDOW_HEIGHT:
+                proj['dy'] *= -1
+        
+        # Rimuovi proiettili scaduti
+        self.projectiles = [p for p in self.projectiles if p['life'] > 0]
+        
+        # Controlla collisioni con player
+        for proj in self.projectiles:
+            dist = math.hypot(player.x - proj['x'], player.y - proj['y'])
+            if dist <= player.radius + 3:
+                player.hp = max(0, player.hp - self.projectile_damage)
+                proj['life'] = 0  # Rimuovi proiettile
+    
+    def take_damage(self, damage):
+        """Riceve danno dal player"""
+        self.hp = max(0, self.hp - damage)
+        return self.hp <= 0  # Ritorna True se è distrutta
+
+    def fire_at_player(self, player):
+        """Spara un proiettile verso il player"""
+        dx = player.x - self.x
+        dy = player.y - self.y
+        dist = math.hypot(dx, dy)
+        if dist == 0:
+            return
+        dx /= dist
+        dy /= dist
+        self.projectiles.append({
+            'x': self.x,
+            'y': self.y,
+            'dx': dx * self.projectile_speed,
+            'dy': dy * self.projectile_speed,
+            'life': 300  # 5 secondi
+        })
+    
+    def draw(self, screen):
+        if self.hp <= 0:
+            return
+        
+        # Corpo torrette
+        pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), self.radius)
+        
+        # Barra HP della torrette
+        bar_width = 40
+        bar_height = 6
+        bar_x = self.x - bar_width // 2
+        bar_y = self.y - self.radius - 10
+        
+        # Sfondo barra
+        pygame.draw.rect(screen, BLACK, (int(bar_x - 1), int(bar_y - 1), bar_width + 2, bar_height + 2))
+        pygame.draw.rect(screen, DARK_RED, (int(bar_x), int(bar_y), bar_width, bar_height))
+        
+        # HP attuale
+        hp_percentage = self.hp / self.max_hp
+        current_width = int(bar_width * hp_percentage)
+        pygame.draw.rect(screen, GREEN, (int(bar_x), int(bar_y), current_width, bar_height))
+        
+        # Indicatore se sta sparando
+        if self.burst_active:
+            pygame.draw.circle(screen, RED, (int(self.x), int(self.y - self.radius // 2)), 5)
+        
+        # Range di attacco (opzionale - mostra solo per debug)
+        # pygame.draw.circle(screen, (100, 100, 100), (int(self.x), int(self.y)), self.range, 1)
+        
+        # Proiettili
+        for proj in self.projectiles:
+            pygame.draw.circle(screen, YELLOW, (int(proj['x']), int(proj['y'])), 3)
+
 class HealthBar:
     def __init__(self, x, y, width, height):
         self.x = x
@@ -843,7 +1224,7 @@ class HealthBar:
 
 class Game:
     def __init__(self):
-        self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+        self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.FULLSCREEN)
         pygame.display.set_caption("Boss Run RPG")
         self.clock = pygame.time.Clock()
         self.level = 1
@@ -864,6 +1245,8 @@ class Game:
            self.boss = Boss4(WINDOW_WIDTH // 2, 150)
        elif level == 5:
            self.boss = Boss5(WINDOW_WIDTH // 2, 150)
+       elif level == 6:  # AGGIUNGI QUESTA PARTE
+           self.boss = Boss6(WINDOW_WIDTH // 2, 150)
 
        self.boss_health_bar = HealthBar(WINDOW_WIDTH // 2 - 150, 20, 300, 30)
        self.player_health_bar = HealthBar(WINDOW_WIDTH - 220, WINDOW_HEIGHT - 60, 200, 25)
@@ -885,7 +1268,11 @@ class Game:
                     self.running = False
                 elif self.game_state == "playing":
                     if event.key == pygame.K_k:
-                        self.player.attack(self.boss)
+                        # MODIFICA QUI: attacco Boss6 e torrette
+                        if isinstance(self.boss, Boss6):
+                            self.boss.take_player_attack(self.player, self.player.attack_damage)
+                        else:
+                            self.player.attack(self.boss)
                     elif event.key == pygame.K_SPACE:
                         self.player.dash()
                 elif self.game_state in ["player_dead", "boss_dead"]:
@@ -920,7 +1307,7 @@ class Game:
                 self.damage_timer = 30
 
         if self.boss.hp <= 0:
-            if self.level < 5:
+            if self.level < 6:
                 self.level += 1
                 self.load_level(self.level)
                 self.player.hp = self.player.max_hp

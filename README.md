@@ -9,5 +9,6 @@ WASD is for moving.
 If you touch the boss it will deal damage to you
 I added a timer so you will see how fast you are in the boss run.
 Trust me, at first you will struggle, but if you learn the boss' attacks and if you move properly, you will destroy all the bosses.
-Copy the code in the other file, prin it in VS code, run it and i hope you enjoy!
+Copy the code in the other file, print it in VS code, install Pygame by digiting "pip install pygame" in your command propmt, run it and i hope you enjoy!
+If VS code shows you an error, just run it again and it should work.
 For the speedrunners: My record time is 14:789 seconds so try your best to set the new record!

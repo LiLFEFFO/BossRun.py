@@ -5,6 +5,7 @@ import random
 
 # Inizializzazione di pygame
 pygame.init()
+pygame.mixer.init()
 
 # Costanti
 WINDOW_WIDTH = 1024
@@ -1222,6 +1223,49 @@ class HealthBar:
             label_rect = label_surface.get_rect(center=(self.x + self.width // 2, self.y - 20))
             screen.blit(label_surface, label_rect)
 
+class Button:
+    def __init__(self, rect, text, color, text_color=WHITE, font_size=32):
+        self.rect = pygame.Rect(rect)
+        self.text = text
+        self.color = color
+        self.text_color = text_color
+        self.font = pygame.font.Font(None, font_size)
+        self.hovered = False
+
+    def draw(self, screen):
+        pygame.draw.rect(screen, self.color if not self.hovered else YELLOW, self.rect, border_radius=12)
+        text_surf = self.font.render(self.text, True, self.text_color)
+        text_rect = text_surf.get_rect(center=self.rect.center)
+        screen.blit(text_surf, text_rect)
+
+    def is_hovered(self, mouse_pos):
+        self.hovered = self.rect.collidepoint(mouse_pos)
+        return self.hovered
+
+    def is_clicked(self, mouse_pos, mouse_pressed):
+        return self.is_hovered(mouse_pos) and mouse_pressed[0]
+
+class AnimatedBullet:
+    def __init__(self, x, y, angle, speed, color):
+        self.x = x
+        self.y = y
+        self.angle = angle
+        self.speed = speed
+        self.color = color
+        self.radius = random.randint(6, 12)
+        self.life = random.randint(60, 120)  # frames
+
+    def update(self):
+        self.x += self.speed * math.cos(self.angle)
+        self.y += self.speed * math.sin(self.angle)
+        self.life -= 1
+
+    def draw(self, screen):
+        pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), self.radius)
+        # trail effect
+        if self.life < 30:
+            pygame.draw.circle(screen, WHITE, (int(self.x), int(self.y)), max(2, self.radius // 2), 1)
+
 class Game:
     def __init__(self):
         self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.FULLSCREEN)
@@ -1232,7 +1276,140 @@ class Game:
         self.load_level(self.level)
         self.running = True
         self.damage_timer = 0
-        self.game_state = "playing"
+        self.game_state = "home"  # Cambia stato iniziale
+        self.home_buttons = self.create_home_buttons()
+        self.info_popup = None
+        self.instructions_popup = None
+        self.lobby_music_playing = False
+        self.bossrun_music_playing = False
+
+        # Animazioni proiettili per la home
+        self.last_bullet_spawn = 0
+        self.bullets = []
+        self.bullet_colors = [RED, YELLOW, BLUE, GREEN, PURPLE]
+        # Colonna sonora della lobby (sostituisci 'lobby.mp3' con il tuo file)
+        self.lobby_music_file = r"QuestofPixels.mp3"  # <-- metti qui il percorso assoluto del file audio che hai preso da Github
+        self.bossrun_music_file = r"staticglitch.mp3"  # <-- metti qui il percorso assoluto del file audio che hai preso da Github
+        self.lobby_music_playing = False
+        self.bossrun_music_playing = False
+
+        # Prova a caricare e riprodurre la musica della lobby
+        try:
+            pygame.mixer.music.load(self.lobby_music_file)
+            pygame.mixer.music.set_volume(0.5)
+            pygame.mixer.music.play(-1)
+            self.lobby_music_playing = True
+        except Exception as e:
+            print("Colonna sonora non trovata o errore:", e)
+
+        self.timer_start = None
+        self.timer_stopped = False
+        self.final_time = None
+
+    def create_home_buttons(self):
+        # Pulsanti centrali
+        center_x = WINDOW_WIDTH // 2
+        center_y = WINDOW_HEIGHT // 2
+        btn_w, btn_h = 320, 60
+        spacing = 30
+        start_btn = Button(
+            rect=(center_x - btn_w // 2, center_y - btn_h - spacing // 2, btn_w, btn_h),
+            text="INIZIA LA BOSS RUN",
+            color=BLUE
+        )
+        exit_btn = Button(
+            rect=(center_x - btn_w // 2, center_y + spacing // 2, btn_w, btn_h),
+            text="Esci",
+            color=DARK_RED
+        )
+        # Pulsanti in alto a destra
+        top_btn_w, top_btn_h = 200, 40
+        discover_btn = Button(
+            rect=(WINDOW_WIDTH - top_btn_w - 30, 30, top_btn_w, top_btn_h),
+            text="Scopri di più",
+            color=PURPLE
+        )
+        commands_btn = Button(
+            rect=(WINDOW_WIDTH - top_btn_w - 30, 80, top_btn_w, top_btn_h),
+            text="Comandi e istruzioni",
+            color=GRAY
+        )
+        return [start_btn, exit_btn, discover_btn, commands_btn]
+
+    def draw_home(self):
+        self.screen.fill((30, 30, 40))
+        # Griglia colorata
+        grid_size = 50
+        for x in range(0, WINDOW_WIDTH, grid_size):
+            pygame.draw.line(self.screen, (80, 80, 120), (x, 0), (x, WINDOW_HEIGHT), 1)
+        for y in range(0, WINDOW_HEIGHT, grid_size):
+            pygame.draw.line(self.screen, (80, 80, 120), (0, y), (WINDOW_WIDTH, y), 1)
+
+        # Animazioni proiettili
+        if pygame.time.get_ticks() - self.last_bullet_spawn > 120:
+            self.spawn_bullet_animation()
+            self.last_bullet_spawn = pygame.time.get_ticks()
+        self.update_bullets()
+        for bullet in self.bullets:
+            bullet.draw(self.screen)
+
+        # Logo stile Boss Run
+        font = pygame.font.Font(None, 90)
+        title = font.render("BOSS RUN RPG", True, (0, 200, 255))
+        self.screen.blit(title, (WINDOW_WIDTH // 2 - title.get_width() // 2, 80))
+
+        # Slogan allegro
+        slogan_font = pygame.font.Font(None, 40)
+        slogan = slogan_font.render("Preparati a schivare e vincere!", True, YELLOW)
+        self.screen.blit(slogan, (WINDOW_WIDTH // 2 - slogan.get_width() // 2, 170))
+
+        # Pulsanti
+        mouse_pos = pygame.mouse.get_pos()
+        mouse_pressed = pygame.mouse.get_pressed()
+        for i, btn in enumerate(self.home_buttons):
+            btn.is_hovered(mouse_pos)
+            btn.draw(self.screen)
+
+        # Gestione click
+        if self.home_buttons[0].is_clicked(mouse_pos, mouse_pressed):  # INIZIA LA BOSS RUN
+            self.game_state = "playing"
+            if self.lobby_music_playing:
+                pygame.mixer.music.stop()
+                self.lobby_music_playing = False
+            # Avvia la musica della boss run
+            if not self.bossrun_music_playing:
+                try:
+                    pygame.mixer.music.load(self.bossrun_music_file)
+                    pygame.mixer.music.set_volume(0.5)
+                    pygame.mixer.music.play(-1)
+                    self.bossrun_music_playing = True
+                except Exception as e:
+                    print("Boss run music error:", e)
+        elif self.home_buttons[1].is_clicked(mouse_pos, mouse_pressed):  # Esci
+            self.running = False
+        elif self.home_buttons[2].is_clicked(mouse_pos, mouse_pressed):  # Scopri di più
+            self.info_popup = True
+        elif self.home_buttons[3].is_clicked(mouse_pos, mouse_pressed):  # Comandi e istruzioni
+            self.instructions_popup = True
+
+        # Popup info
+        if self.info_popup:
+            self.draw_popup("Boss Run RPG\nUn gioco arcade dove affronti boss\n sempre più difficili!\nCreato in Python con Pygame.\nPremi qualsiasi tasto per chiudere.", PURPLE)
+        if self.instructions_popup:
+            self.draw_popup("Comandi:\nWASD/Frecce: Movimento\nK: Attacco\nSPAZIO: Dash\nESC: Esci\nPremi qualsiasi tasto per chiudere.", GRAY)
+
+        pygame.display.flip()
+
+    def draw_popup(self, text, color):
+        popup_w, popup_h = 500, 240
+        popup_x = WINDOW_WIDTH // 2 - popup_w // 2
+        popup_y = WINDOW_HEIGHT // 2 - popup_h // 2
+        pygame.draw.rect(self.screen, color, (popup_x, popup_y, popup_w, popup_h), border_radius=16)
+        font = pygame.font.Font(None, 32)
+        lines = text.split('\n')
+        for i, line in enumerate(lines):
+            txt = font.render(line, True, WHITE)
+            self.screen.blit(txt, (popup_x + 30, popup_y + 30 + i * 35))
 
     def load_level(self, level):
        if level == 1:
@@ -1253,22 +1430,28 @@ class Game:
 
 
     def restart_game(self):
-       self.player = Player(WINDOW_WIDTH // 2, WINDOW_HEIGHT - 100)
-       self.load_level(self.level)
-       self.running = True
-       self.damage_timer = 0
-       self.game_state = "playing"
+        self.player = Player(WINDOW_WIDTH // 2, WINDOW_HEIGHT - 100)
+        self.load_level(self.level)
+        self.running = True
+        self.damage_timer = 0
+        self.game_state = "playing"
+        # NON resettare il timer!
+        # self.timer_start = None
+        self.timer_stopped = False
+        self.final_time = None
 
     def handle_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
+                if self.game_state == "home":
+                    self.info_popup = None
+                    self.instructions_popup = None
+                elif event.key == pygame.K_ESCAPE:
                     self.running = False
                 elif self.game_state == "playing":
                     if event.key == pygame.K_k:
-                        # MODIFICA QUI: attacco Boss6 e torrette
                         if isinstance(self.boss, Boss6):
                             self.boss.take_player_attack(self.player, self.player.attack_damage)
                         else:
@@ -1313,12 +1496,14 @@ class Game:
                 self.player.hp = self.player.max_hp
             else:
                 self.game_state = "boss_dead"
+                if not self.timer_stopped:
+                    self.final_time = pygame.time.get_ticks() - self.timer_start
+                    self.timer_stopped = True
             return
-
-
 
         if self.player.hp <= 0:
             self.game_state = "player_dead"
+            # NON fermare il timer qui!
             return
 
         distance = math.hypot(self.player.x - self.boss.x, self.player.y - self.boss.y)
@@ -1329,6 +1514,9 @@ class Game:
                 self.damage_timer = 30
 
     def draw(self):
+        if self.game_state == "home":
+            self.draw_home()
+            return
         self.screen.fill(DARK_GRAY)
         grid_size = 50
         for x in range(0, WINDOW_WIDTH, grid_size):
@@ -1376,6 +1564,35 @@ class Game:
             text = font.render("SEI MORTO! Premi R per riprovare o Q per uscire.", True, RED)
             self.screen.blit(text, (WINDOW_WIDTH // 2 - text.get_width() // 2, WINDOW_HEIGHT // 2))
 
+        # Spazio per il nome della musica durante la boss run
+        if self.game_state == "playing" and self.bossrun_music_playing:
+            font = pygame.font.Font(None, 28)
+            music_text = font.render("♪ Static Glitch in riproduzione", True, YELLOW)
+            self.screen.blit(music_text, (10, WINDOW_HEIGHT - 30))
+
+        # Cronometro in alto a destra
+        font = pygame.font.Font(None, 36)
+        timer_x = WINDOW_WIDTH - 320
+        timer_y = 10
+
+        if self.timer_start is None:
+            self.timer_start = pygame.time.get_ticks()
+
+        if self.game_state == "boss_dead" and self.timer_stopped:
+            elapsed_ms = self.final_time
+        else:
+            elapsed_ms = pygame.time.get_ticks() - self.timer_start
+
+        minutes = elapsed_ms // 60000
+        seconds = (elapsed_ms // 1000) % 60
+        decimi = (elapsed_ms // 100) % 10
+        centesimi = (elapsed_ms // 10) % 10
+        millesimi = elapsed_ms % 10
+
+        timer_text = f"{minutes:02d}:{seconds:02d}:{decimi}{centesimi}{millesimi}"
+        timer_surface = font.render(timer_text, True, YELLOW)
+        self.screen.blit(timer_surface, (timer_x, timer_y))
+
         pygame.display.flip()
 
     def run(self):
@@ -1387,6 +1604,29 @@ class Game:
 
         pygame.quit()
         sys.exit()
+
+    def spawn_bullet_animation(self):
+        # Spawn bullets from random edges towards the center
+        edge = random.choice(['top', 'bottom', 'left', 'right'])
+        if edge == 'top':
+            x, y = random.randint(0, WINDOW_WIDTH), 0
+        elif edge == 'bottom':
+            x, y = random.randint(0, WINDOW_WIDTH), WINDOW_HEIGHT
+        elif edge == 'left':
+            x, y = 0, random.randint(0, WINDOW_HEIGHT)
+        else:
+            x, y = WINDOW_WIDTH, random.randint(0, WINDOW_HEIGHT)
+        center_x, center_y = WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2
+        angle = math.atan2(center_y - y, center_x - x) + random.uniform(-0.3, 0.3)
+        speed = random.uniform(4, 8)
+        color = random.choice(self.bullet_colors)
+        self.bullets.append(AnimatedBullet(x, y, angle, speed, color))
+
+    def update_bullets(self):
+        for bullet in self.bullets[:]:
+            bullet.update()
+            if bullet.life <= 0:
+                self.bullets.remove(bullet)
 
 if __name__ == "__main__":
     game = Game()

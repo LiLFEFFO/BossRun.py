@@ -10,4 +10,4 @@ If you touch the boss it will deal damage to you
 I added a timer so you will see how fast you are in the boss run.
 Trust me, at first you will struggle, but if you learn the boss' attacks and if you move properly, you will destroy all the bosses.
 Copy the code in the other file, prin it in VS code, run it and i hope you enjoy!
-For the speedrunners: My record time is 15:913 so try your best to set the new record!
+For the speedrunners: My record time is 14:789 seconds so try your best to set the new record!

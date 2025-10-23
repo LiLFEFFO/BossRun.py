@@ -310,8 +310,7 @@ class LaserBoss(Boss):
             if self.phase == 1:
                 # Spara 3 proiettili verso il player
                 for offset in [-30, 0, 30]:
-                    projectiles.append(Projectile(self.x, self.y, 
-                                                 player.x + offset, player.y, RED, 7, 12))
+                    projectiles.append(Projectile(self.x, self.y,player.x + offset, player.y, RED, 7, 12))         
                 self.attack_cooldown = 50
             else:
                 # Fase 2: Pattern a ventaglio
@@ -336,64 +335,46 @@ class LaserBoss(Boss):
         pulse = abs(math.sin(self.movement_timer * 0.1)) * 10
         pygame.draw.circle(surface, YELLOW, (int(self.x), int(self.y)), int(15 + pulse))
 
-# Boss 4: The Teleporter - Si teletrasporta
-class TeleporterBoss(Boss):
+class SentinelBoss(Boss):
     def __init__(self):
-        super().__init__("THE TELEPORTER", 280, PURPLE)
-        self.teleport_cooldown = 0
-        self.visible = True
-        self.fade = 255
-        
+        super().__init__(name="Sentinel", hp=200, color=(150, 200, 255))
+        self.orbit_radius = 200
+        self.orbit_speed = 0.02
+        self.angle = 0
+        self.shield_active = False
+        self.shield_timer = 0
+
     def update(self):
-        super().update()
-        if self.teleport_cooldown > 0:
-            self.teleport_cooldown -= 1
-            self.fade = max(0, self.fade - 15)
-        else:
-            self.fade = min(255, self.fade + 15)
-            
-        if self.teleport_cooldown == 1:
-            self.x = random.randint(150, WIDTH - 150)
-            self.y = random.randint(100, 250)
-            
+        # Movimento orbitale attorno al centro dello schermo
+        self.angle += self.orbit_speed
+        self.x = WIDTH // 2 + math.cos(self.angle) * self.orbit_radius
+        self.y = HEIGHT // 2 + math.sin(self.angle) * self.orbit_radius
+
+        # Gestione scudo
+        if self.shield_timer > 0:
+            self.shield_timer -= 1
+            if self.shield_timer == 0:
+                self.shield_active = False
+
     def attack(self, player):
         projectiles = []
-        if self.attack_cooldown == 0 and self.fade == 255:
-            if self.phase == 1:
-                # Spara 4 proiettili
-                for _ in range(4):
-                    angle = random.uniform(0, 360)
-                    rad = math.radians(angle)
-                    target_x = self.x + math.cos(rad) * 400
-                    target_y = self.y + math.sin(rad) * 400
-                    projectiles.append(Projectile(self.x, self.y, target_x, target_y, PURPLE, 6, 10))
-                self.attack_cooldown = 70
-                self.teleport_cooldown = 120
-            else:
-                # Fase 2: Più proiettili e teletrasporto più frequente
-                for i in range(8):
-                    angle = i * 45
-                    rad = math.radians(angle)
-                    target_x = self.x + math.cos(rad) * 400
-                    target_y = self.y + math.sin(rad) * 400
-                    projectiles.append(Projectile(self.x, self.y, target_x, target_y, 
-                                                 (200, 0, 255), 7, 12))
-                self.attack_cooldown = 60
-                self.teleport_cooldown = 90
+        if random.random() < 0.02:
+            # Spara 8 proiettili radiali
+            for i in range(8):
+                angle = math.radians(i * 45)
+                dx, dy = math.cos(angle), math.sin(angle)
+                projectiles.append(Projectile(self.x, self.y, player.x, player.y, RED, speed=5, damage=10))
+        # Attiva scudo a intervalli
+        if random.random() < 0.005:
+            self.shield_active = True
+            self.shield_timer = 120
         return projectiles
-        
-    def draw(self, surface):
-        if self.fade > 0:
-            # Effetto dissolvenza
-            s = pygame.Surface((self.size * 3, self.size * 3), pygame.SRCALPHA)
-            color_with_alpha = (*self.color, self.fade)
-            pygame.draw.circle(s, color_with_alpha, (self.size * 1.5, self.size * 1.5), self.size)
-            # Anelli
-            for i in range(3):
-                pygame.draw.circle(s, (*WHITE, self.fade // 2), 
-                                 (self.size * 1.5, self.size * 1.5), 
-                                 self.size + i * 15, 2)
-            screen.blit(s, (int(self.x - self.size * 1.5), int(self.y - self.size * 1.5)))
+
+    def take_damage(self, damage):
+        if self.shield_active:
+            # Lo scudo blocca completamente i danni
+            return False
+        return super().take_damage(damage)
 
 # Boss 5: The Spinner - Rotazione e proiettili rotanti
 class SpinnerBoss(Boss):
@@ -444,68 +425,46 @@ class SpinnerBoss(Boss):
 # Boss 6: The Final Chaos - Boss finale con tutti gli attacchi
 class ChaosBoss(Boss):
     def __init__(self):
-        super().__init__("CHAOS INCARNATE", 400, (255, 0, 255))
-        self.attack_pattern = 0
-        self.chaos_timer = 0
-        
+        super().__init__("THE FINAL CHAOS", 500, PURPLE)
+        self.phase_timer = 0
+        self.enraged = False
+        self.teleport_cooldown = 300
+
     def update(self):
-        super().update()
-        self.chaos_timer += 1
-        # Movimento caotico
-        if self.chaos_timer % 60 < 30:
-            self.x += math.sin(self.chaos_timer * 0.1) * 3
-        else:
-            self.y = 150 + math.sin(self.chaos_timer * 0.05) * 40
-            
+        self.phase_timer += 1
+        self.teleport_cooldown -= 1
+
+        # Enrage sotto 30% HP
+        if not self.enraged and self.hp <= self.max_hp * 0.3:
+            self.enraged = True
+            self.color = (255, 0, 200)
+
     def attack(self, player):
         projectiles = []
-        if self.attack_cooldown == 0:
-            self.attack_pattern = (self.attack_pattern + 1) % 3
-            
-            if self.attack_pattern == 0:
-                # Pattern a spirale
+        if random.random() < (0.05 if not self.enraged else 0.12):
+            pattern = random.choice(["burst", "spiral", "aimed"])
+            if pattern == "burst":
+                # Cerchio di 12 proiettili
                 for i in range(12):
-                    angle = (self.chaos_timer * 5 + i * 30) % 360
-                    rad = math.radians(angle)
-                    target_x = self.x + math.cos(rad) * 500
-                    target_y = self.y + math.sin(rad) * 500
-                    projectiles.append(Projectile(self.x, self.y, target_x, target_y, 
-                                                 (255, 0, 255), 6, 13))
-            elif self.attack_pattern == 1:
-                # Mirare al player con spread
-                for offset_x in [-50, 0, 50]:
-                    for offset_y in [-50, 0, 50]:
-                        projectiles.append(Projectile(self.x, self.y, 
-                                                     player.x + offset_x, 
-                                                     player.y + offset_y, 
-                                                     RED, 8, 15))
-            else:
-                # Pattern casuale
-                for _ in range(15):
-                    angle = random.uniform(0, 360)
-                    rad = math.radians(angle)
-                    target_x = self.x + math.cos(rad) * 400
-                    target_y = self.y + math.sin(rad) * 400
-                    projectiles.append(Projectile(self.x, self.y, target_x, target_y, 
-                                                 YELLOW, 7, 12))
-            
-            self.attack_cooldown = 35 if self.phase == 2 else 50
+                    angle = math.radians(i * 30)
+                    dx, dy = math.cos(angle) * 6, math.sin(angle) * 6
+                    projectiles.append(Projectile(self.x, self.y, player.x, player.y, RED, speed=5, damage=10))
+            elif pattern == "spiral":
+                # Spirale di 8 proiettili ruotati
+                for i in range(8):
+                    angle = math.radians(i * 45 + self.phase_timer * 5)
+                    dx, dy = math.cos(angle) * 5, math.sin(angle) * 5
+                    projectiles.append(Projectile(self.x, self.y, player.x, player.y, RED, speed=4, damage=15))
+            elif pattern == "aimed":
+                # Raffica diretta verso il player
+                dx, dy = player.x - self.x, player.y - self.y
+                dist = math.hypot(dx, dy)
+                dx, dy = dx / dist * 8, dy / dist * 8
+                for i in range(3 if not self.enraged else 6):
+                    projectiles.append(Projectile(self.x, self.y, player.x, player.y, PURPLE, speed=7, damage=20))
         return projectiles
-        
-    def draw(self, surface):
-        # Effetto caotico con multiple forme
-        colors = [(255, 0, 255), (255, 0, 0), (0, 255, 255), (255, 255, 0)]
-        for i, color in enumerate(colors):
-            offset = math.sin(self.chaos_timer * 0.1 + i) * 15
-            pygame.draw.circle(surface, color, 
-                             (int(self.x + offset), int(self.y + offset)), 
-                             self.size - i * 10, 3)
-        # Nucleo
-        pygame.draw.circle(surface, WHITE, (int(self.x), int(self.y)), 20)
-        # Occhio
-        pygame.draw.circle(surface, BLACK, (int(self.x), int(self.y)), 10)
 
-# UI
+# UIa
 def draw_health_bar(surface, x, y, width, height, hp, max_hp, color):
     # Bordo
     pygame.draw.rect(surface, WHITE, (x - 2, y - 2, width + 4, height + 4), 2)
@@ -543,11 +502,13 @@ class Game:
         self.start_time = 0
         self.elapsed_time = 0
         self.total_time = 0
+        self.transition_timer = 0
+        self.next_boss_index = 0
         self.boss_classes = [
             OrbiterBoss,
             SwarmBoss,
             LaserBoss,
-            TeleporterBoss,
+            SentinelBoss,
             SpinnerBoss,
             ChaosBoss
         ]
@@ -567,86 +528,104 @@ class Game:
         self.projectiles = []
         
     def update(self):
+        # --- Gioco attivo ---
         if self.state == GameState.PLAYING:
             self.elapsed_time = (pygame.time.get_ticks() - self.start_time) / 1000
-            
             keys = pygame.key.get_pressed()
             self.player.update(keys)
-            
-            # Auto-sparo verso il boss
-            if self.boss:
+    
+            # --- Spara solo se non in transizione ---
+            if self.boss and self.transition_timer == 0:
                 proj = self.player.shoot(self.boss.x, self.boss.y)
                 if proj:
                     self.projectiles.append(proj)
-            
-            # Aggiorna boss
-            if self.boss:
+    
+            # --- Aggiorna boss e attacchi (solo se non in pausa) ---
+            if self.boss and self.transition_timer == 0:
                 self.boss.update()
                 new_projectiles = self.boss.attack(self.player)
                 self.projectiles.extend(new_projectiles)
-            
-            # Aggiorna proiettili
+    
+            # --- Aggiorna proiettili ---
             for proj in self.projectiles[:]:
                 proj.update()
                 if not proj.active:
                     self.projectiles.remove(proj)
                     continue
                 
-                # Collisione con player (solo proiettili nemici)
+                # --- Collisione con player (solo proiettili nemici) ---
                 if proj.color != YELLOW:
-                    dist = math.sqrt((proj.x - self.player.x)**2 + (proj.y - self.player.y)**2)
+                    dist = math.dist((proj.x, proj.y), (self.player.x, self.player.y))
                     if dist < self.player.size + proj.size:
                         if self.player.take_damage(proj.damage):
                             self.state = GameState.GAME_OVER
                             self.total_time = self.elapsed_time
-                        self.projectiles.remove(proj)
-                        # Particelle
+                        if proj in self.projectiles:
+                            self.projectiles.remove(proj)
+                        # Particelle di impatto
                         for _ in range(10):
                             vel = (random.uniform(-3, 3), random.uniform(-3, 3))
                             self.particles.append(Particle(proj.x, proj.y, RED, vel))
                         continue
-                
-                # Collisione con boss (solo proiettili player)
+                    
+                # --- Collisione con boss (solo proiettili del player) ---
                 if proj.color == YELLOW and self.boss:
-                    dist = math.sqrt((proj.x - self.boss.x)**2 + (proj.y - self.boss.y)**2)
+                    dist = math.dist((proj.x, proj.y), (self.boss.x, self.boss.y))
                     if dist < self.boss.size + proj.size:
-                        if self.boss.take_damage(proj.damage):
-                        # Boss sconfitto — prepara la transizione
-                            self.transition_timer = 120  # 2 secondi di pausa
-                            self.next_boss_index = self.current_boss_index + 1
-                            if self.next_boss_index >= len(self.boss_classes):
-                                self.state = GameState.VICTORY
-                                self.total_time = self.elapsed_time
-                            self.projectiles.clear()
-                            self.particles.clear()
-                        break  # interrompe il ciclo proiettili per evitare errori
-
-                        self.projectiles.remove(proj)
-                        # Particelle
+                        boss_died = self.boss.take_damage(proj.damage)
+    
+                        # Rimuovi il proiettile solo se ancora presente
+                        if proj in self.projectiles:
+                            self.projectiles.remove(proj)
+    
+                        # Effetto particelle
                         for _ in range(15):
                             vel = (random.uniform(-4, 4), random.uniform(-4, 4))
                             self.particles.append(Particle(proj.x, proj.y, self.boss.color, vel))
                         sound_manager.play_hit_sound()
-                        continue
-                        
-                # Collisione con minion (SwarmBoss)
+    
+                        if boss_died:
+                            # --- Boss sconfitto: prepara transizione ---
+                            self.transition_timer = 120  # 2 secondi
+                            self.next_boss_index = self.current_boss_index + 1
+    
+                            if self.next_boss_index >= len(self.boss_classes):
+                                self.state = GameState.VICTORY
+                                self.total_time = self.elapsed_time
+                            else:
+                                # Congela boss e proiettili per la transizione
+                                self.boss = None
+                                self.projectiles.clear()
+                                self.particles.clear()
+                        break  # esci dal ciclo per evitare doppie collisioni
+                    
+                # --- Collisione con minion (solo per SwarmBoss) ---
                 if proj.color == YELLOW and isinstance(self.boss, SwarmBoss):
                     for minion in self.boss.minions[:]:
-                        dist = math.sqrt((proj.x - minion['x'])**2 + (proj.y - minion['y'])**2)
+                        dist = math.dist((proj.x, proj.y), (minion["x"], minion["y"]))
                         if dist < 15:
                             self.boss.minions.remove(minion)
                             if proj in self.projectiles:
                                 self.projectiles.remove(proj)
                             for _ in range(8):
                                 vel = (random.uniform(-3, 3), random.uniform(-3, 3))
-                                self.particles.append(Particle(minion['x'], minion['y'], GREEN, vel))
+                                self.particles.append(Particle(minion["x"], minion["y"], GREEN, vel))
                             break
-            
-            # Aggiorna particelle
+                        
+            # --- Aggiorna particelle ---
             for particle in self.particles[:]:
                 particle.update()
                 if particle.life <= 0:
                     self.particles.remove(particle)
+    
+        # --- Gestione transizione boss (fuori dallo stato PLAYING) ---
+        if hasattr(self, "transition_timer") and self.transition_timer > 0:
+            self.transition_timer -= 1
+            if self.transition_timer == 0:
+                if self.next_boss_index < len(self.boss_classes):
+                    self.current_boss_index = self.next_boss_index
+                    self.load_boss()
+
     
     def draw(self):
         screen.fill(BLACK)
